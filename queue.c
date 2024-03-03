@@ -4,6 +4,13 @@
 
 #include "queue.h"
 
+static bool cmp_function(struct list_head *lhs,
+                         struct list_head *rhs,
+                         bool descend);
+static int q_scend(struct list_head *head, bool descend);
+int q_merge_two(struct list_head *head1, struct list_head *head2, bool descend);
+
+
 /* Notice: sometimes, Cppcheck would find the potential NULL pointer bugs,
  * but some of them cannot occur. You can suppress them by adding the
  * following line.
@@ -230,14 +237,42 @@ void q_reverseK(struct list_head *head, int k)
 }
 
 /* Sort elements of queue in ascending/descending order */
-void q_sort(struct list_head *head, bool descend) {}
+void q_sort(struct list_head *head, bool descend)
+{
+    if (!head)
+        return;
+    else if (list_empty(head))
+        return;
+    else if (list_is_singular(head))
+        return;
+
+    /* Step 1: Find middle node */
+    struct list_head *fast = head->next;
+    struct list_head *middle = head->next;
+    while (fast != head && fast->next != head) {
+        fast = fast->next->next;
+        middle = middle->next;
+    }
+
+    /* Step 2: Divide head into __head and head. It is important to notice that
+     * we have to cut at middle->prev */
+    struct list_head __head;
+    list_cut_position(&__head, head, middle->prev);
+
+    /* Step 3: Sort __head and head separately */
+    q_sort(&__head, descend);
+    q_sort(head, descend);
+
+    /* Step 4: Merge __head and head back into head */
+    q_merge_two(head, &__head, descend);
+}
 
 /* Remove every node which has a node with a strictly less value anywhere to
  * the right side of it */
 int q_ascend(struct list_head *head)
 {
     // https://leetcode.com/problems/remove-nodes-from-linked-list/
-    return 0;
+    return q_scend(head, false);
 }
 
 /* Remove every node which has a node with a strictly greater value anywhere to
@@ -245,7 +280,7 @@ int q_ascend(struct list_head *head)
 int q_descend(struct list_head *head)
 {
     // https://leetcode.com/problems/remove-nodes-from-linked-list/
-    return 0;
+    return q_scend(head, true);
 }
 
 /* Merge all the queues into one sorted queue, which is in ascending/descending
@@ -253,5 +288,92 @@ int q_descend(struct list_head *head)
 int q_merge(struct list_head *head, bool descend)
 {
     // https://leetcode.com/problems/merge-k-sorted-lists/
-    return 0;
+    if (!head)
+        return 0;
+    else if (list_empty(head))
+        return 0;
+
+    struct list_head trash;
+    INIT_LIST_HEAD(&trash);
+    while (!list_is_singular(head)) {
+        struct list_head *trace = head->next;
+        while (trace != head && trace->next != head) {
+            trace = trace->next->next;
+            queue_contex_t *first =
+                list_entry(trace->prev->prev, queue_contex_t, chain);
+            queue_contex_t *second =
+                list_entry(trace->prev, queue_contex_t, chain);
+            first->size = q_merge_two(first->q, second->q, descend);
+
+            second->size = 0;
+            list_move(&second->chain, &trash);
+        }
+    }
+    list_splice_tail(&trash, head);
+    return list_first_entry(head, queue_contex_t, chain)->size;
+}
+
+/* Compare two strings to check if they are in order */
+static bool cmp_function(struct list_head *lhs,
+                         struct list_head *rhs,
+                         bool descend)
+{
+    element_t *l_element = list_entry(lhs, element_t, list);
+    element_t *r_element = list_entry(rhs, element_t, list);
+
+    int result = strcmp(l_element->value, r_element->value);
+    if (descend)
+        return result >= 0;
+    else
+        return result <= 0;
+}
+
+/* Common function for q_ascend() and q_descend() */
+static int q_scend(struct list_head *head, bool descend)
+{
+    if (!head)
+        return 0;
+    else if (list_empty(head))
+        return 0;
+
+    int count = 0;
+    struct list_head *node, *safe;
+    list_for_each_safe (node, safe, head) {
+        count++;
+        while (node->prev != head && !cmp_function(node->prev, node, descend)) {
+            struct list_head *target = node->prev;
+            list_del(target);
+            q_release_element(list_entry(target, element_t, list));
+            count--;
+        }
+    }
+    return count;
+}
+
+/* Merge two queues into one sorted queue, which is in ascending/descending
+ * order. Merged list will be saved in head1, and head2 will be set to NULL.
+ * Return: merged list size
+ */
+int q_merge_two(struct list_head *head1, struct list_head *head2, bool descend)
+{
+    if (!head1 && !head2)
+        return 0;
+
+    struct list_head mhead;
+    INIT_LIST_HEAD(&mhead);
+    while (!list_empty(head1) && !list_empty(head2)) {
+        if (cmp_function(head1->next, head2->next, descend)) {
+            list_move_tail(head1->next, &mhead);
+        } else {
+            list_move_tail(head2->next, &mhead);
+        }
+    }
+
+    if (list_empty(head1))
+        list_splice_tail_init(head2, &mhead);
+    else
+        list_splice_tail_init(head1, &mhead);
+
+    list_splice_tail_init(&mhead, head1);
+    return q_size(head1);
 }
