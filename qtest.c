@@ -22,6 +22,7 @@
 #include "dudect/fixture.h"
 #include "list.h"
 #include "random.h"
+#include "timsort.h"
 
 /* Shannon entropy */
 extern double shannon_entropy(const uint8_t *input_data);
@@ -629,6 +630,73 @@ bool do_sort(int argc, char *argv[])
     return ok && !error_check();
 }
 
+int compare(void *priv,
+            const struct list_head *lhs,
+            const struct list_head *rhs)
+{
+    element_t *l_element = list_entry(lhs, element_t, list);
+    element_t *r_element = list_entry(rhs, element_t, list);
+
+    int res = strcmp(l_element->value, r_element->value);
+
+    if (priv)
+        *((int *) priv) += 1;
+
+    return res;
+}
+
+bool do_timsort(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    int cnt = 0;
+    if (!current || !current->q)
+        report(3, "Warning: Calling sort on null queue");
+    else
+        cnt = q_size(current->q);
+    error_check();
+
+    if (cnt < 2)
+        report(3, "Warning: Calling sort on single node");
+    error_check();
+
+    set_noallocate_mode(true);
+    int count;
+    if (current && exception_setup(true))
+        timsort(&count, current->q, compare);
+    exception_cancel();
+    set_noallocate_mode(false);
+
+    bool ok = true;
+    if (current && current->size) {
+        for (struct list_head *cur_l = current->q->next;
+             cur_l != current->q && --cnt; cur_l = cur_l->next) {
+            /* Ensure each element in ascending/descending order */
+            element_t *item, *next_item;
+            item = list_entry(cur_l, element_t, list);
+            next_item = list_entry(cur_l->next, element_t, list);
+            if (!descend && strcmp(item->value, next_item->value) > 0) {
+                report(1, "ERROR: Not sorted in ascending order");
+                ok = false;
+                break;
+            }
+
+            if (descend && strcmp(item->value, next_item->value) < 0) {
+                report(1, "ERROR: Not sorted in descending order");
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    q_show(3);
+    return ok && !error_check();
+}
+
+
 static bool do_dm(int argc, char *argv[])
 {
     if (argc != 1) {
@@ -1036,6 +1104,7 @@ static void console_init()
         "[str]");
     ADD_COMMAND(reverse, "Reverse queue", "");
     ADD_COMMAND(sort, "Sort queue in ascending/descening order", "");
+    ADD_COMMAND(timsort, "TimSort queue in ascending/descening order", "");
     ADD_COMMAND(size, "Compute queue size n times (default: n == 1)", "[n]");
     ADD_COMMAND(show, "Show queue contents", "");
     ADD_COMMAND(dm, "Delete middle node in queue", "");
