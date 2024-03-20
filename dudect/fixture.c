@@ -64,6 +64,38 @@ static void differentiate(int64_t *exec_times,
         exec_times[i] = after_ticks[i] - before_ticks[i];
 }
 
+#ifdef PETER
+static int cmp(const int64_t *a, const int64_t *b)
+{
+    return (int) (*a - *b);
+}
+
+static int64_t percentile(int64_t *a_sorted, double which, size_t size)
+{
+    size_t array_position = (size_t) ((double) size * (double) which);
+    assert(array_position < size);
+    return a_sorted[array_position];
+}
+
+/*
+ * set different thresholds for cropping measurements.
+ * the exponential tendency is meant to approximately match
+ * the measurements distribution, but there's not more science
+ * than that.
+ */
+static void prepare_percentiles(int64_t *exec_times, int64_t *percentiles)
+{
+    qsort(exec_times, N_MEASURES, sizeof(int64_t),
+          (int (*)(const void *, const void *)) cmp);
+    for (size_t i = 0; i < N_PERCENTILES; i++) {
+        percentiles[i] = percentile(
+            exec_times, 1 - (pow(0.5, 10 * (double) (i + 1) / N_PERCENTILES)),
+            N_MEASURES);
+    }
+}
+#endif
+
+
 static void update_statistics(const int64_t *exec_times, uint8_t *classes)
 {
     for (size_t i = 0; i < N_MEASURES; i++) {
@@ -83,7 +115,7 @@ static bool report(void)
     double number_traces_max_t = t->n[0] + t->n[1];
     double max_tau = max_t / sqrt(number_traces_max_t);
 
-    printf("\033[A\033[2K");
+    // printf("\033[A\033[2K");
     printf("meas: %7.2lf M, ", (number_traces_max_t / 1e6));
     if (number_traces_max_t < ENOUGH_MEASURE) {
         printf("not enough measurements (%.0f still to go).\n",
@@ -103,6 +135,9 @@ static bool report(void)
      */
     printf("max t: %+7.2f, max tau: %.2e, (5/tau)^2: %.2e.\n", max_t, max_tau,
            (double) (5 * 5) / (double) (max_tau * max_tau));
+    printf("    class0: %f, %f, %f; class1: %f, %f, %f\n", t->mean[0],
+           t->m2[0] / (t->n[0] - 1), t->n[0], t->mean[1],
+           t->m2[1] / (t->n[1] - 1), t->n[1]);
 
     /* Definitely not constant time */
     if (max_t > t_threshold_bananas)
@@ -116,6 +151,7 @@ static bool report(void)
     return true;
 }
 
+// static int64_t percentiles[N_PERCENTILES] = {0};
 static bool doit(int mode)
 {
     int64_t *before_ticks = calloc(N_MEASURES + 1, sizeof(int64_t));
@@ -133,6 +169,8 @@ static bool doit(int mode)
 
     bool ret = measure(before_ticks, after_ticks, input_data, mode);
     differentiate(exec_times, before_ticks, after_ticks);
+
+    // prepare_percentiles(exec_times, percentiles);
     update_statistics(exec_times, classes);
     ret &= report();
 
@@ -162,7 +200,7 @@ static bool test_const(char *text, int mode)
         for (int i = 0; i < ENOUGH_MEASURE / (N_MEASURES - DROP_SIZE * 2) + 1;
              ++i)
             result = doit(mode);
-        printf("\033[A\033[2K\033[A\033[2K");
+        // printf("\033[A\033[2K\033[A\033[2K");
         if (result)
             break;
     }
@@ -170,8 +208,11 @@ static bool test_const(char *text, int mode)
     return result;
 }
 
-#define DUT_FUNC_IMPL(op) \
-    bool is_##op##_const(void) { return test_const(#op, DUT(op)); }
+#define DUT_FUNC_IMPL(op)                \
+    bool is_##op##_const(void)           \
+    {                                    \
+        return test_const(#op, DUT(op)); \
+    }
 
 #define _(x) DUT_FUNC_IMPL(x)
 DUT_FUNCS
